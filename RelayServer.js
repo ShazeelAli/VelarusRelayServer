@@ -1,15 +1,13 @@
 var net = require("net");
-var ws = require("ws")
-const { stringify } = require("querystring");
-const { send } = require("process");
+var udp = require('dgram');
 var port = 3000;
-
 var server = net.createServer();
-
-var CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz1234567890";
+var UDPserver = udp.createSocket({type:'udp4',reuseAddr: true});
+var CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890";
 var CLIENTS = new Map();
 var HOSTS = new Map();
-var CLIENT_COUNT = 0;
+CLIENT_COUNT = 0;
+
 server.on("connection",function(socket)
 {   
     console.log("Player connected: ")
@@ -18,9 +16,17 @@ server.on("connection",function(socket)
     socket.setTimeout(600000)
 
     var client_id = create_id();
+    var TCP_connect_success_msg = 
+    {
+        code:"TCP_RELAY_SUCCESS",
+        client_id:client_id
+
+    }
+    send_packet(socket,TCP_connect_success_msg)
     CLIENTS[client_id] = 
     {
         socket: socket,
+        udpinfo:"",
         client_id: client_id,
         room_code: "",
         player_name: ""
@@ -58,7 +64,7 @@ server.on("connection",function(socket)
 			for (var s = 0; s < splits.length; s++) 
 			{
                 
-				var split = splits[s];
+                var split = splits[s];
 				if (split != "") 
 				{
 					// snip off the end header from string
@@ -79,19 +85,22 @@ server.on("connection",function(socket)
                         console.log("JSON Parse Error")
 					}
 				}
+
+                // keep going if more
+                if (splits.length > 0 && splits[splits.length-1] != "") 
+                {
+                    data_stream = splits[splits.length-1];
+                }
+                else {
+                    //print("You are gay")
+                    data_stream = "";
+                    start_stream = false;
+
+                }
 			}
+            
 		}
-		// keep going if more
-		if (splits.length > 0 && splits[splits.length-1] != "") 
-		{
-			data_stream = splits[splits.length-1];
-		}
-		else {
 
-			data_stream = "";
-			start_stream = false;
-
-		}
 
 
     });
@@ -124,8 +133,7 @@ server.on("connection",function(socket)
                 HOSTS[client_id] = undefined;
 
             }
-
-            if(CLIENTS[client_id].room_code != "")
+            else if(CLIENTS[client_id].room_code != "")
             {
                 var indexToRemove = HOSTS[CLIENTS[client_id].room_code].PLAYERS.indexOf(CLIENTS[client_id])
                 HOSTS[CLIENTS[client_id].room_code].PLAYERS.splice(indexToRemove,1)
@@ -134,8 +142,12 @@ server.on("connection",function(socket)
                     code:"REMOVE_PLAYER",
                     client_id:client_id
                 }
-                CLIENTS[client_id].room_code = ""
+                
+                
                 send_packet(HOSTS[CLIENTS[client_id].room_code].socket,_msg)
+                CLIENTS[client_id].room_code = ""
+                
+                
             }
 
         }
@@ -147,6 +159,83 @@ server.listen(port,function()
     console.log("The Server has been Started");
 });
 
+//UDP Seerver
+UDPserver.on('listening',function(){
+    var address = server.address();
+    var port = address.port;
+    console.log('Server is listening at port' + port);
+});
+
+UDPserver.on('message',function(data,info){
+        var data_stream = "";
+        var start_stream = false;
+        var str = data.toString('utf-8')
+		// if we have a start header start appending any data
+		if (str.indexOf("XSTART") == 0) {
+			if (start_stream == false) {
+			start_stream = true;
+			data_stream += str;
+
+			} 
+		}
+		else if (start_stream == true) {
+		data_stream += str;
+		}
+
+		// once we have an end header try splitting the data
+		if (str.indexOf("XENDX") != -1) 
+		{  
+			// split data based on start + end headers
+			var splits = data_stream.split("XENDX");
+			for (var s = 0; s < splits.length; s++) 
+			{
+                
+                var split = splits[s];
+				if (split != "") 
+				{
+					// snip off the end header from string
+					var position = split.indexOf("XSTART");
+					var plen = split.length-position+1;
+					var postcursor = split.replace("XSTART","");
+                    
+			
+					try
+					{
+                        console.log("Receiving Packet")
+                        console.log(postcursor)
+						var json = JSON.parse(postcursor)
+						received_packet(info,json.client_id,json.code,json)
+					}
+					catch (ex)
+					{
+                        console.log("JSON Parse Error")
+					}
+				}
+
+                // keep going if more
+                if (splits.length > 0 && splits[splits.length-1] != "") 
+                {
+                    data_stream = splits[splits.length-1];
+                }
+                else {
+
+                    data_stream = "";
+                    start_stream = false;
+
+                }
+			}
+            
+		}
+		
+    
+});
+
+UDPserver.on('error',function(error){
+    console.log('Error: ' + error);
+    server.close();
+});
+
+UDPserver.bind(port)
 function create_id(){
     var id =""
     for (var a = 0; a < 5; a++){
@@ -175,8 +264,6 @@ function received_packet(socket,client_id, code, json)
                 socket: socket, 
                 client_id: client_id,
                 host_name: json.player_name, 
-                uuid: "", 
-                pal: "", 
                 status: "New", 
                 PLAYERS: []
             }
@@ -184,7 +271,20 @@ function received_packet(socket,client_id, code, json)
                 code:"HOST_SUCCESS",
                 room_code:HOSTS[client_id].client_id})
             break;
+
+        case "UDPCONNECT":
+            CLIENTS[json.client_id].udpinfo = socket;
+            var UDP_connect_success_msg = 
+            {
+                code:"UDP_RELAY_SUCCESS"
+            }
+            send_packet_udp(socket,UDP_connect_success_msg)
+            break;
         case "JOINHOST":
+            if(HOSTS[json.room_code] != undefined)
+            {
+
+            
             HOSTS[json.room_code].PLAYERS.push(CLIENTS[client_id])
             CLIENTS[client_id].room_code = json.room_code
             CLIENTS[client_id].player_name = json.player_name
@@ -195,8 +295,17 @@ function received_packet(socket,client_id, code, json)
             send_packet(CLIENTS[client_id].socket,
                 {
                     code:"JOIN_SUCCESS",
-                    room_code:json.room_code
+                    room_code:json.room_code,
+                    client_id:client_id
                 })
+            }
+            else
+            {
+                send_packet(CLIENTS[client_id].socket,
+                    {
+                        code:"JOIN_FAIL"
+                    })
+            }
                 break;
         case "DISCONNECT":
             // DISCONECT CODE
@@ -232,9 +341,30 @@ function received_packet(socket,client_id, code, json)
             break;
 
         case "SYNC":
-            HOSTS[json.room_code].PLAYERS.forEach(player => send_packet(player.socket,json));
-            break;
+            switch(json.message_type)
+            {
+                case "TCP":
+                    HOSTS[json.room_code].PLAYERS.forEach(player => send_packet(player.socket,json));
+                    break;
+                case "UDP":
+                    HOSTS[json.room_code].PLAYERS.forEach(player => send_packet_udp(player.udpinfo,json));
+                    break;
 
+            }
+            break;
+           
+        case "COMMAND":
+            switch(json.message_type)
+            {
+                case "TCP":
+                    send_packet(CLIENTS[json.room_code].socket,json)
+                    break;
+                case "UDP":
+                    send_packet_udp(CLIENTS[json.room_code].udpinfo,json)
+                    break;
+
+            }
+            break;
             
             
 
@@ -250,6 +380,24 @@ function send_packet(socket,json)
     data += _msg //+ "=::="
 	data = "XSTART" + data + "XENDX"
     socket.write(data)
+
+}
+
+function send_packet_udp(socket,json)
+{
+    var _msg = JSON.stringify(json)
+    console.log("Being Sent UDP:")
+    console.log(_msg)
+    var data = ""
+    data += _msg //+ "=::="
+	data = "XSTART" + data + "XENDX"
+    UDPserver.send(data,socket.port,socket.address, (error) => {
+        if (error) {
+            console.error(error)
+        } 
+        else {
+        console.log(_msg)}
+    })
 
 }
 
