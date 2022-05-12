@@ -7,7 +7,7 @@ var CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890";
 var CLIENTS = new Map();
 var HOSTS = new Map();
 CLIENT_COUNT = 0;
-
+//#region TCP Server
 server.on("connection",function(socket)
 {   
     console.log("Player connected: ")
@@ -159,7 +159,9 @@ server.listen(port,function()
     console.log("The Server has been Started");
 });
 
-//UDP Seerver
+//#endregion
+
+//#region UDP Server
 UDPserver.on('listening',function(){
     var address = server.address();
     var port = address.port;
@@ -236,6 +238,7 @@ UDPserver.on('error',function(error){
 });
 
 UDPserver.bind(port)
+//#endregion UDP Server
 function create_id(){
     var id =""
     for (var a = 0; a < 5; a++){
@@ -371,6 +374,7 @@ function received_packet(socket,client_id, code, json)
     }
 }
 
+//#region Packet sending
 function send_packet(socket,json)
 {
     var _msg = JSON.stringify(json)
@@ -400,4 +404,4 @@ function send_packet_udp(socket,json)
     })
 
 }
-
+//#endregion
