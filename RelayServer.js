@@ -1,8 +1,13 @@
+// Imports
 var net = require("net");
 var udp = require('dgram');
+
+// Server creation
 var port = 3000;
 var server = net.createServer();
 var UDPserver = udp.createSocket({type:'udp4',reuseAddr: true});
+
+// Setup Base Server Logic variables
 var CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890";
 var CLIENTS = new Map();
 var HOSTS = new Map();
@@ -168,69 +173,69 @@ UDPserver.on('listening',function(){
     console.log('Server is listening at port' + port);
 });
 
-UDPserver.on('message',function(data,info){
-        var data_stream = "";
-        var start_stream = false;
-        var str = data.toString('utf-8')
-		// if we have a start header start appending any data
-		if (str.indexOf("XSTART") == 0) {
-			if (start_stream == false) {
-			start_stream = true;
-			data_stream += str;
+UDPserver.on('message',(data,info) => setImmediate(() => {
+    var data_stream = "";
+    var start_stream = false;
+    var str = data.toString('utf-8')
+    // if we have a start header start appending any data
+    if (str.indexOf("XSTART") == 0) {
+        if (start_stream == false) {
+        start_stream = true;
+        data_stream += str;
 
-			} 
-		}
-		else if (start_stream == true) {
-		data_stream += str;
-		}
+        } 
+    }
+    else if (start_stream == true) {
+    data_stream += str;
+    }
 
-		// once we have an end header try splitting the data
-		if (str.indexOf("XENDX") != -1) 
-		{  
-			// split data based on start + end headers
-			var splits = data_stream.split("XENDX");
-			for (var s = 0; s < splits.length; s++) 
-			{
-                
-                var split = splits[s];
-				if (split != "") 
-				{
-					// snip off the end header from string
-					var position = split.indexOf("XSTART");
-					var plen = split.length-position+1;
-					var postcursor = split.replace("XSTART","");
-                    
-			
-					try
-					{
-                        console.log("Receiving Packet")
-                        console.log(postcursor)
-						var json = JSON.parse(postcursor)
-						received_packet(info,json.client_id,json.code,json)
-					}
-					catch (ex)
-					{
-                        console.log("JSON Parse Error")
-					}
-				}
-
-                // keep going if more
-                if (splits.length > 0 && splits[splits.length-1] != "") 
-                {
-                    data_stream = splits[splits.length-1];
-                }
-                else {
-
-                    data_stream = "";
-                    start_stream = false;
-
-                }
-			}
+    // once we have an end header try splitting the data
+    if (str.indexOf("XENDX") != -1) 
+    {  
+        // split data based on start + end headers
+        var splits = data_stream.split("XENDX");
+        for (var s = 0; s < splits.length; s++) 
+        {
             
-		}
-		
+            var split = splits[s];
+            if (split != "") 
+            {
+                // snip off the end header from string
+                var position = split.indexOf("XSTART");
+                var plen = split.length-position+1;
+                var postcursor = split.replace("XSTART","");
+                
+        
+                try
+                {
+                    console.log("Receiving Packet")
+                    console.log(postcursor)
+                    var json = JSON.parse(postcursor)
+                    received_packet(info,json.client_id,json.code,json)
+                }
+                catch (ex)
+                {
+                    console.log("JSON Parse Error")
+                }
+            }
+
+            // keep going if more
+            if (splits.length > 0 && splits[splits.length-1] != "") 
+            {
+                data_stream = splits[splits.length-1];
+            }
+            else {
+
+                data_stream = "";
+                start_stream = false;
+
+            }
+        }
+    }
+        
+
     
-});
+}));
 
 UDPserver.on('error',function(error){
     console.log('Error: ' + error);
